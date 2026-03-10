@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+compress.log
+
+# Cache
+.pytest_cache/
+.cache/
+
+# State files
+.compress_state.json
+
+# OS
+.DS_Store
+Thumbs.db
