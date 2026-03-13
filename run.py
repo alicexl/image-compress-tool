@@ -103,7 +103,7 @@ def compress(
 
         # 扫描文件
         logger.info("扫描文件...")
-        large_files, small_files, scan_stats = batch_processor.scan_files(
+        large_files, small_files, video_files, scan_stats = batch_processor.scan_files(
             input_dir,
             pattern=pattern,
             min_size_mb=1.0,
@@ -112,24 +112,34 @@ def compress(
         )
 
         total_files = len(large_files) + len(small_files)
-        if total_files == 0 and scan_stats['skipped'] == 0:
+        total_video = len(video_files)
+        if total_files == 0 and total_video == 0 and scan_stats['skipped'] == 0:
             logger.warning("没有找到需要处理的文件")
             return
 
         # 打印扫描结果
         print(f"\n扫描结果:")
-        print(f"  - 总计: {scan_stats['total']} 个文件")
+        print(f"  - 图片总计: {scan_stats['total']} 个")
         print(f"  - 待处理: {total_files} 个 (大文件 {len(large_files)}, 小文件 {len(small_files)})")
         print(f"  - 已存在跳过: {scan_stats['skipped']} 个")
         if scan_stats['invalid'] > 0:
             print(f"  - 无效文件: {scan_stats['invalid']} 个")
+        if total_video > 0:
+            print(f"  - 视频文件: {total_video} 个")
+        if scan_stats.get('video_skipped', 0) > 0:
+            print(f"  - 视频已存在跳过: {scan_stats['video_skipped']} 个")
 
-        if total_files == 0:
+        if total_files == 0 and total_video == 0:
             logger.info("所有文件已处理完成，无需重复处理")
             return
 
         # 用户确认
-        print(f"\n即将处理 {total_files} 个文件")
+        items_text = []
+        if total_files > 0:
+            items_text.append(f"{total_files} 个图片")
+        if total_video > 0:
+            items_text.append(f"{total_video} 个视频")
+        print(f"\n即将处理 {' + '.join(items_text)}")
         print(f"质量参数: {quality}")
         print(f"输出目录: {output}")
         if not click.confirm("\n确认开始处理", default=True):
@@ -160,23 +170,40 @@ def compress(
             print("\n用户中断操作")
             return
 
+        # 复制视频文件
+        video_results = {'success': 0, 'failed': 0, 'total_size': 0}
+        if video_files:
+            print(f"\n正在复制 {len(video_files)} 个视频文件...")
+            video_results = batch_processor.copy_video_files(
+                video_files=video_files,
+                output_dir=output
+            )
+
         # 打印结果
         elapsed = datetime.now() - start_time
         total_original_mb = results['total_original_size'] / (1024 * 1024)
         total_compressed_mb = results['total_compressed_size'] / (1024 * 1024)
+        video_size_mb = video_results['total_size'] / (1024 * 1024)
         saved_mb = total_original_mb - total_compressed_mb
         avg_ratio = total_compressed_mb / total_original_mb if total_original_mb > 0 else 0
 
         print("\n" + "=" * 50)
         print(f"处理完成")
-        print(f"总文件数: {results['total']}")
-        print(f"压缩成功: {results['success']}")
-        print(f"小文件复制: {results.get('copied', 0)}")
-        print(f"失败: {results['failed']}")
-        print(f"原始总大小: {total_original_mb:.2f} MB")
-        print(f"压缩后总大小: {total_compressed_mb:.2f} MB")
-        print(f"节省空间: {saved_mb:.2f} MB")
-        print(f"平均压缩比: {avg_ratio:.2%}")
+        print(f"图片处理:")
+        print(f"  - 总文件数: {results['total']}")
+        print(f"  - 压缩成功: {results['success']}")
+        print(f"  - 小文件复制: {results.get('copied', 0)}")
+        print(f"  - 失败: {results['failed']}")
+        if video_files:
+            print(f"视频处理:")
+            print(f"  - 复制成功: {video_results['success']}")
+            print(f"  - 失败: {video_results['failed']}")
+            print(f"  - 视频大小: {video_size_mb:.2f} MB")
+        print(f"压缩统计:")
+        print(f"  - 原始总大小: {total_original_mb:.2f} MB")
+        print(f"  - 压缩后总大小: {total_compressed_mb:.2f} MB")
+        print(f"  - 节省空间: {saved_mb:.2f} MB")
+        print(f"  - 平均压缩比: {avg_ratio:.2%}")
         print(f"总用时: {elapsed}")
         print("=" * 50)
 

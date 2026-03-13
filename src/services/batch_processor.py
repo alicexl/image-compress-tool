@@ -4,13 +4,20 @@
 """
 
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Callable
+from typing import List, Dict, Any, Optional, Callable, Set
 import logging
+import shutil
 
 from ..core.compressor import Compressor
 from ..infrastructure.file_manager import FileManager
 
 logger = logging.getLogger(__name__)
+
+# 支持的图片文件扩展名
+IMAGE_EXTENSIONS: Set[str] = {'.jpg', '.jpeg'}
+
+# 支持的视频文件扩展名
+VIDEO_EXTENSIONS: Set[str] = {'.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm', '.m4v', '.mpeg', '.mpg', '.3gp'}
 
 
 class BatchProcessor:
@@ -53,17 +60,19 @@ class BatchProcessor:
 
         Args:
             directory: 目录路径
-            pattern: 文件名模式
+            pattern: 文件名模式（已废弃，保留兼容性）
             min_size_mb: 最小文件大小（MB），小于此值的文件直接复制
             skip_existing: 是否跳过已存在的文件
             output_dir: 输出目录
 
         Returns:
-            (大文件列表, 小文件列表, 扫描统计信息)
+            (大文件列表, 小文件列表, 视频文件列表, 扫描统计信息)
         """
         large_files = []  # 需要压缩的大文件
         small_files = []  # 需要直接复制的小文件
+        video_files = []  # 视频文件
         skipped_files = []  # 已存在跳过的文件
+        skipped_videos = []  # 已存在跳过的视频
         invalid_files = []  # 无效的已存在文件
 
         # 确保使用绝对路径
@@ -72,7 +81,15 @@ class BatchProcessor:
             output_dir = output_dir.resolve()
 
         try:
-            for file_path in directory.glob(pattern):
+            # 扫描图片文件（支持 .jpg 和 .jpeg）
+            for file_path in directory.iterdir():
+                if not file_path.is_file():
+                    continue
+
+                # 检查是否是图片文件
+                if file_path.suffix.lower() not in IMAGE_EXTENSIONS:
+                    continue
+
                 # 转换为绝对路径
                 file_path = file_path.resolve()
 
@@ -104,27 +121,48 @@ class BatchProcessor:
                 else:
                     large_files.append(file_path)
 
+            # 扫描视频文件
+            for file_path in directory.iterdir():
+                if not file_path.is_file():
+                    continue
+                if file_path.suffix.lower() in VIDEO_EXTENSIONS:
+                    file_path = file_path.resolve()
+
+                    # 检查输出文件是否已存在
+                    if skip_existing and output_dir:
+                        output_path = output_dir / file_path.name
+                        if output_path.exists():
+                            skipped_videos.append(file_path)
+                            logger.debug(f"跳过已存在视频: {file_path.name}")
+                            continue
+
+                    video_files.append(file_path)
+                    logger.debug(f"发现视频文件: {file_path.name}")
+
             # 统计信息
             stats = {
                 'total': len(large_files) + len(small_files) + len(skipped_files),
                 'large': len(large_files),
                 'small': len(small_files),
                 'skipped': len(skipped_files),
-                'invalid': len(invalid_files)
+                'invalid': len(invalid_files),
+                'video': len(video_files),
+                'video_skipped': len(skipped_videos)
             }
 
             logger.info(
-                f"扫描完成: 总计 {stats['total']} 个文件, "
+                f"扫描完成: 图片 {stats['total']} 个, "
                 f"待处理 {len(large_files) + len(small_files)} 个 "
                 f"(大文件 {len(large_files)}, 小文件 {len(small_files)}), "
-                f"已存在跳过 {len(skipped_files)} 个"
+                f"已存在跳过 {len(skipped_files)} 个, "
+                f"视频 {len(video_files)} 个"
             )
 
         except Exception as e:
             logger.error(f"扫描文件失败 {directory}: {e}")
-            stats = {'total': 0, 'large': 0, 'small': 0, 'skipped': 0, 'invalid': 0}
+            stats = {'total': 0, 'large': 0, 'small': 0, 'skipped': 0, 'invalid': 0, 'video': 0, 'video_skipped': 0}
 
-        return large_files, small_files, stats
+        return large_files, small_files, video_files, stats
 
     def _is_valid_image(self, file_path: Path) -> bool:
         """
@@ -309,6 +347,81 @@ class BatchProcessor:
             result['message'] = f"异常: {str(e)}"
 
         return result
+
+    def copy_video_files(
+        self,
+        video_files: List[Path],
+        output_dir: Path,
+        progress_callback: Optional[Callable[[int, int, str, str], None]] = None
+    ) -> Dict[str, Any]:
+        """
+        复制视频文件到输出目录
+
+        Args:
+            video_files: 视频文件列表
+            output_dir: 输出目录
+            progress_callback: 进度回调函数
+
+        Returns:
+            复制结果
+        """
+        results = {
+            'total': len(video_files),
+            'success': 0,
+            'failed': 0,
+            'total_size': 0,
+            'details': []
+        }
+
+        if not video_files:
+            return results
+
+        # 确保输出目录存在
+        if not self.file_manager.ensure_directory(output_dir):
+            results['message'] = "创建输出目录失败"
+            return results
+
+        for i, video_path in enumerate(video_files):
+            video_path = video_path.resolve()
+
+            # 进度回调
+            if progress_callback:
+                progress_callback(i, len(video_files), video_path.name, status='processing')
+
+            result = {
+                'input_path': video_path,
+                'status': 'failed',
+                'message': '',
+                'size': 0
+            }
+
+            try:
+                output_path = output_dir / video_path.name
+                file_size = video_path.stat().st_size
+                result['size'] = file_size
+
+                # 复制文件
+                shutil.copy2(video_path, output_path)
+
+                result['status'] = 'success'
+                result['message'] = '视频复制成功'
+                results['success'] += 1
+                results['total_size'] += file_size
+                logger.debug(f"复制视频: {video_path.name}")
+
+            except Exception as e:
+                result['message'] = f"复制失败: {str(e)}"
+                results['failed'] += 1
+                logger.error(f"复制视频失败 {video_path}: {e}")
+
+            results['details'].append(result)
+
+            # 进度回调
+            if progress_callback:
+                progress_callback(i + 1, len(video_files), video_path.name, status='completed')
+
+        logger.info(f"视频复制完成: 成功={results['success']}, 失败={results['failed']}")
+        return results
 
     def process_batch(
         self,

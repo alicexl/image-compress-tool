@@ -51,7 +51,7 @@ class TestBatchProcessor(unittest.TestCase):
 
     def test_scan_files(self):
         """测试文件扫描"""
-        large_files, small_files, stats = self.batch_processor.scan_files(
+        large_files, small_files, video_files, stats = self.batch_processor.scan_files(
             self.test_data_dir,
             pattern="*.jpg",
             min_size_mb=0.1,
@@ -67,7 +67,7 @@ class TestBatchProcessor(unittest.TestCase):
 
     def test_scan_with_filter(self):
         """测试带过滤的文件扫描"""
-        large_files, small_files, stats = self.batch_processor.scan_files(
+        large_files, small_files, video_files, stats = self.batch_processor.scan_files(
             self.test_data_dir,
             pattern="*.jpg",
             min_size_mb=100.0,
@@ -78,7 +78,7 @@ class TestBatchProcessor(unittest.TestCase):
 
     def test_process_single_file(self):
         """测试处理单个文件"""
-        large_files, small_files, stats = self.batch_processor.scan_files(
+        large_files, small_files, video_files, stats = self.batch_processor.scan_files(
             self.test_data_dir,
             pattern="*.jpg",
             min_size_mb=0.1,
@@ -108,7 +108,7 @@ class TestBatchProcessor(unittest.TestCase):
 
     def test_batch_process(self):
         """测试批量处理"""
-        large_files, small_files, stats = self.batch_processor.scan_files(
+        large_files, small_files, video_files, stats = self.batch_processor.scan_files(
             self.test_data_dir,
             pattern="*.jpg",
             min_size_mb=0.1,
@@ -158,7 +158,7 @@ class TestBatchProcessor(unittest.TestCase):
 
     def test_progress_callback_signature(self):
         """测试进度回调函数签名"""
-        large_files, small_files, stats = self.batch_processor.scan_files(
+        large_files, small_files, video_files, stats = self.batch_processor.scan_files(
             self.test_data_dir,
             pattern="*.jpg",
             min_size_mb=0.1,
@@ -198,7 +198,7 @@ class TestBatchProcessor(unittest.TestCase):
 
     def test_skip_existing(self):
         """测试跳过已存在文件"""
-        large_files, small_files, stats = self.batch_processor.scan_files(
+        large_files, small_files, video_files, stats = self.batch_processor.scan_files(
             self.test_data_dir,
             pattern="*.jpg",
             min_size_mb=0.1,
@@ -219,7 +219,7 @@ class TestBatchProcessor(unittest.TestCase):
         )
         self.assertEqual(result1['status'], 'success')
 
-        large_files2, small_files2, stats2 = self.batch_processor.scan_files(
+        large_files2, small_files2, video_files2, stats2 = self.batch_processor.scan_files(
             self.test_data_dir,
             pattern="*.jpg",
             min_size_mb=0.1,
@@ -253,7 +253,7 @@ class TestBatchProcessor(unittest.TestCase):
         """测试 Ctrl+C 中断处理"""
         from unittest.mock import patch
 
-        large_files, small_files, stats = self.batch_processor.scan_files(
+        large_files, small_files, video_files, stats = self.batch_processor.scan_files(
             self.test_data_dir,
             pattern="*.jpg",
             min_size_mb=0.1,
