@@ -19,7 +19,7 @@ from src.utils.logger import setup_logger
 @click.argument('input_dir', type=click.Path(exists=True, path_type=Path))
 @click.option(
     '-q', '--quality',
-    default=75,
+    default=80,
     type=click.IntRange(1, 100),
     show_default=True,
     help='压缩质量 (1-100)'
@@ -170,11 +170,11 @@ def compress(
             print("\n用户中断操作")
             return
 
-        # 复制视频文件
+        # 移动视频文件
         video_results = {'success': 0, 'failed': 0, 'total_size': 0}
         if video_files:
-            print(f"\n正在复制 {len(video_files)} 个视频文件...")
-            video_results = batch_processor.copy_video_files(
+            print(f"\n正在移动 {len(video_files)} 个视频文件...")
+            video_results = batch_processor.move_video_files(
                 video_files=video_files,
                 output_dir=output
             )
@@ -196,7 +196,7 @@ def compress(
         print(f"  - 失败: {results['failed']}")
         if video_files:
             print(f"视频处理:")
-            print(f"  - 复制成功: {video_results['success']}")
+            print(f"  - 移动成功: {video_results['success']}")
             print(f"  - 失败: {video_results['failed']}")
             print(f"  - 视频大小: {video_size_mb:.2f} MB")
         print(f"压缩统计:")
@@ -211,6 +211,15 @@ def compress(
         temp_count = file_manager.cleanup_temp_files(output)
         if temp_count > 0:
             logger.info(f"清理了 {temp_count} 个临时文件")
+
+        # 删除原文件夹
+        if results['failed'] == 0 and video_results['failed'] == 0:
+            import shutil
+            logger.info(f"删除原文件夹: {input_dir}")
+            shutil.rmtree(input_dir)
+            print(f"\n已删除原文件夹: {input_dir}")
+        else:
+            logger.warning("存在处理失败的文件，保留原文件夹")
 
         logger.info("处理完成")
 

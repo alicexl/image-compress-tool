@@ -348,14 +348,14 @@ class BatchProcessor:
 
         return result
 
-    def copy_video_files(
+    def move_video_files(
         self,
         video_files: List[Path],
         output_dir: Path,
         progress_callback: Optional[Callable[[int, int, str, str], None]] = None
     ) -> Dict[str, Any]:
         """
-        复制视频文件到输出目录
+        移动视频文件到输出目录
 
         Args:
             video_files: 视频文件列表
@@ -363,7 +363,7 @@ class BatchProcessor:
             progress_callback: 进度回调函数
 
         Returns:
-            复制结果
+            移动结果
         """
         results = {
             'total': len(video_files),
@@ -400,19 +400,19 @@ class BatchProcessor:
                 file_size = video_path.stat().st_size
                 result['size'] = file_size
 
-                # 复制文件
-                shutil.copy2(video_path, output_path)
+                # 移动文件
+                shutil.move(str(video_path), str(output_path))
 
                 result['status'] = 'success'
-                result['message'] = '视频复制成功'
+                result['message'] = '视频移动成功'
                 results['success'] += 1
                 results['total_size'] += file_size
-                logger.debug(f"复制视频: {video_path.name}")
+                logger.debug(f"移动视频: {video_path.name}")
 
             except Exception as e:
-                result['message'] = f"复制失败: {str(e)}"
+                result['message'] = f"移动失败: {str(e)}"
                 results['failed'] += 1
-                logger.error(f"复制视频失败 {video_path}: {e}")
+                logger.error(f"移动视频失败 {video_path}: {e}")
 
             results['details'].append(result)
 
@@ -420,7 +420,7 @@ class BatchProcessor:
             if progress_callback:
                 progress_callback(i + 1, len(video_files), video_path.name, status='completed')
 
-        logger.info(f"视频复制完成: 成功={results['success']}, 失败={results['failed']}")
+        logger.info(f"视频移动完成: 成功={results['success']}, 失败={results['failed']}")
         return results
 
     def process_batch(
