@@ -3,13 +3,15 @@
 提供单张图片的压缩功能
 """
 
-from PIL import Image
+from PIL import Image, ImageFile
 from pathlib import Path
 from typing import Tuple, Optional
 import logging
 
 # 禁用 PIL 像素限制检查
 Image.MAX_IMAGE_PIXELS = None
+# 允许加载截断的图片文件
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 logger = logging.getLogger(__name__)
 
