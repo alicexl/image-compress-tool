@@ -556,6 +556,210 @@ class BatchProcessor:
 
         return results
 
+    def compress_inplace(
+        self,
+        input_dir: Path,
+        min_size_mb: float = 1.0,
+        progress_callback: Optional[Callable[[int, int, str, str], None]] = None
+    ) -> Dict[str, Any]:
+        """
+        原地压缩目录下的图片
+
+        流程：
+        1. 压缩到临时文件 (filename.jpg.tmp)
+        2. 验证压缩文件有效
+        3. 删除原文件
+        4. 重命名临时文件为原文件名
+
+        Args:
+            input_dir: 输入目录
+            min_size_mb: 最小文件大小（MB），小于此值的文件跳过
+            progress_callback: 进度回调函数
+
+        Returns:
+            处理结果字典
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        import threading
+
+        input_dir = input_dir.resolve()
+
+        results = {
+            'total': 0,
+            'success': 0,
+            'skipped': 0,  # 小文件跳过
+            'failed': 0,
+            'total_original_size': 0,
+            'total_compressed_size': 0,
+            'details': []
+        }
+
+        # 扫描图片文件
+        image_files = []
+        for file_path in input_dir.iterdir():
+            if not file_path.is_file():
+                continue
+            if file_path.suffix.lower() not in IMAGE_EXTENSIONS:
+                continue
+            image_files.append(file_path)
+
+        results['total'] = len(image_files)
+
+        if not image_files:
+            logger.info("没有找到需要原地压缩的图片")
+            return results
+
+        # 线程安全的计数器和锁
+        completed_counter = [0]
+        counter_lock = threading.Lock()
+        results_lock = threading.Lock()
+
+        def process_single_file(file_path: Path):
+            """处理单个文件的原地压缩"""
+            nonlocal completed_counter
+
+            with counter_lock:
+                current_completed = completed_counter[0]
+                completed_counter[0] += 1
+
+            # 进度回调
+            if progress_callback:
+                progress_callback(current_completed, len(image_files), file_path.name, status='processing')
+
+            result = {
+                'input_path': file_path,
+                'status': 'failed',
+                'message': '',
+                'original_size': 0,
+                'compressed_size': 0,
+            }
+
+            try:
+                # 获取原始大小
+                original_size = file_path.stat().st_size
+                result['original_size'] = original_size
+
+                # 小文件跳过
+                size_mb = original_size / (1024 * 1024)
+                if size_mb < min_size_mb:
+                    result['status'] = 'skipped'
+                    result['message'] = f"小文件跳过 ({size_mb:.2f}MB)"
+                    logger.debug(f"跳过小文件: {file_path.name}")
+                    return result
+
+                # 验证图片
+                valid, msg = self.compressor.validate_image(file_path)
+                if not valid:
+                    result['status'] = 'failed'
+                    result['message'] = msg
+                    return result
+
+                # 临时文件路径
+                temp_path = file_path.with_suffix(file_path.suffix + '.tmp')
+
+                # 压缩到临时文件
+                success, ratio, message = self.compressor.compress(file_path, temp_path)
+
+                if not success:
+                    result['status'] = 'failed'
+                    result['message'] = message
+                    # 清理临时文件
+                    if temp_path.exists():
+                        temp_path.unlink()
+                    return result
+
+                # 验证临时文件
+                if not temp_path.exists() or temp_path.stat().st_size <= 0:
+                    result['status'] = 'failed'
+                    result['message'] = "临时文件验证失败"
+                    if temp_path.exists():
+                        temp_path.unlink()
+                    return result
+
+                compressed_size = temp_path.stat().st_size
+                result['compressed_size'] = compressed_size
+
+                # 删除原文件
+                file_path.unlink()
+
+                # 重命名临时文件为原文件名
+                temp_path.rename(file_path)
+
+                result['status'] = 'success'
+                result['message'] = f"压缩成功 (压缩比: {ratio:.2%})"
+                logger.debug(f"原地压缩成功: {file_path.name}")
+
+            except Exception as e:
+                logger.error(f"原地压缩失败 {file_path}: {e}")
+                result['status'] = 'failed'
+                result['message'] = f"异常: {str(e)}"
+                # 清理临时文件
+                temp_path = file_path.with_suffix(file_path.suffix + '.tmp')
+                if temp_path.exists():
+                    try:
+                        temp_path.unlink()
+                    except:
+                        pass
+
+            return result
+
+        # 使用线程池并发处理
+        executor = ThreadPoolExecutor(max_workers=self.max_workers)
+        interrupted = False
+
+        try:
+            futures = {
+                executor.submit(process_single_file, f): f
+                for f in image_files
+            }
+
+            for future in as_completed(futures):
+                try:
+                    result = future.result()
+
+                    with results_lock:
+                        results['details'].append(result)
+
+                        if result['status'] == 'success':
+                            results['success'] += 1
+                            results['total_original_size'] += result['original_size']
+                            results['total_compressed_size'] += result['compressed_size']
+                        elif result['status'] == 'skipped':
+                            results['skipped'] += 1
+                        else:
+                            results['failed'] += 1
+
+                    # 进度回调
+                    if progress_callback:
+                        progress_callback(
+                            completed_counter[0],
+                            len(image_files),
+                            futures[future].name,
+                            status='completed'
+                        )
+
+                except Exception as e:
+                    logger.error(f"处理文件异常: {e}")
+                    with results_lock:
+                        results['failed'] += 1
+
+        except KeyboardInterrupt:
+            interrupted = True
+            logger.info("收到中断信号，正在取消未完成的任务...")
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
+
+        if interrupted:
+            results['interrupted'] = True
+
+        logger.info(
+            f"原地压缩完成: 成功={results['success']}, "
+            f"跳过={results['skipped']}, "
+            f"失败={results['failed']}"
+        )
+
+        return results
+
     def get_summary(self, results: Dict[str, Any]) -> str:
         """
         生成处理摘要
